@@ -116,7 +116,7 @@ with col2:
                     season_array = np.full(num_items, season_enc_val)
                     predictions = model.predict([user_array, all_items_encoded, season_array], verbose=0).flatten()
                     
-                    pool_size = min(7, num_items)
+                    pool_size = min(10, num_items)
                     
                     np.random.seed(numpy_safe_seed)
                     noise_factor = np.random.normal(0, 0.05, num_items)
