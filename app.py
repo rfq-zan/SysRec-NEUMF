@@ -6,27 +6,21 @@ from sklearn.preprocessing import LabelEncoder
 import urllib.parse
 import random
 
-# --- 1. KONFIGURASI HALAMAN ---
 st.set_page_config(page_title="TripWise Madura", page_icon="🏝️", layout="wide")
 
-# --- 2. FUNGSI CACHE UNTUK LOADING DATA & MODEL ---
 @st.cache_data
 def load_data_and_encoders():
-    # Load dataset yang sudah DIBERSIHKAN dari Colab
     try:
         df = pd.read_excel('dataset_bersih_ui.xlsx')
     except FileNotFoundError:
-        # PERUBAHAN 1: Fallback diubah ke dataset Madura yang baru
         df = pd.read_excel('dataset_madura_bersih.xlsx')
     
-    # Mencari nama lom ulasan secara dinamis
     review_col = None
     for col in ['ulasan_bersih', 'ulasan', 'text_original', 'text', 'review']:
         if col in df.columns:
             review_col = col
             break
             
-    # Ekstrak maksimal 3 ulasan acak per destinasi
     reviews_dict = {}
     if review_col:
         valid_reviews = df.dropna(subset=[review_col])
@@ -34,22 +28,17 @@ def load_data_and_encoders():
             lambda x: list(x.sample(min(len(x), 3), random_state=42))
         ).to_dict()
 
-    # Ambil metadata destinasi untuk UI
     meta_df = df[['id_destinasi', 'destinasi', 'wisata']].drop_duplicates(subset=['id_destinasi'])
     meta_dict = meta_df.set_index('id_destinasi').to_dict('index')
     
-    # Gabungkan ulasan ke dalam meta_dict
     for dest_id in meta_dict.keys():
         meta_dict[dest_id]['reviews'] = reviews_dict.get(dest_id, ["Belum ada ulasan yang tersedia."])
     
-    # Fokus pada kolom untuk model NeuMF
     df_model = df[['id_destinasi', 'rekomendasi_cuaca']].dropna()
     
-    # PERUBAHAN 2: Batas ID User disamakan dengan Colab (1 sampai 300) agar tidak error out-of-bounds
     np.random.seed(42)
     df_model['user_id'] = np.random.randint(1, 301, size=len(df_model))
     
-    # Inisialisasi Label Encoders
     encoders = {
         'user': LabelEncoder().fit(df_model['user_id']),
         'item': LabelEncoder().fit(df_model['id_destinasi']),
@@ -65,12 +54,10 @@ def load_data_and_encoders():
 def load_model():
     return tf.keras.models.load_model('neumf_seasonal_model.h5')
 
-# --- 3. PROSES LOADING ---
 with st.spinner('Memuat Engine Rekomendasi NeuMF & Basis Data Ulasan...'):
     df_model, encoders, unique_destinations, unique_seasons, meta_dict = load_data_and_encoders()
     model = load_model()
 
-# --- 4. ANTARMUKA PENGGUNA (UI) ---
 st.title("🏝️ TripWise Madura")
 st.markdown("### Sistem Rekomendasi Destinasi Wisata Cerdas Berbasis *Konteks Musim*")
 st.write("Temukan destinasi wisata terbaik di Pulau Madura yang aman dan paling cocok dengan cuaca hari ini.")
@@ -84,7 +71,6 @@ with col1:
     # Input Nama
     nama_wisatawan = st.text_input("Nama Anda:", placeholder="Contoh: Rifqi")
     
-    # Fungsi ini mempercantik tulisan di Dropdown UI tanpa merusak data asli AI
     def percantik_teks_cuaca(cuaca_asli):
         teks = str(cuaca_asli).lower()
         if 'kemarau' in teks and ('hujan' in teks or 'penghujan' in teks):
@@ -95,7 +81,6 @@ with col1:
             return "☀️ Musim Kemarau (Cerah, Terik & Langit Bersih)"
         return f"🌡️ Kondisi Cuaca: {cuaca_asli}"
 
-    # Input Parameter Cuaca dengan Format UI
     season_input = st.selectbox(
         "Bagaimana Prediksi Cuaca Saat Kunjungan Anda?", 
         unique_seasons,
@@ -119,7 +104,6 @@ with col2:
                     user_hash = abs(hash(nama_wisatawan.lower().strip()))
                     guest_id = valid_user_ids[user_hash % len(valid_user_ids)]
                     
-                    # Membatasi angka hash agar tidak melebihi batas maksimal NumPy (2**32 - 1)
                     numpy_safe_seed = user_hash % (2**32)
                     
                     user_enc_val = encoders['user'].transform([guest_id])[0]
@@ -130,14 +114,10 @@ with col2:
                     
                     user_array = np.full(num_items, user_enc_val)
                     season_array = np.full(num_items, season_enc_val)
-                    
-                    # Inference NeuMF
                     predictions = model.predict([user_array, all_items_encoded, season_array], verbose=0).flatten()
                     
-                    # PERUBAHAN 3: Menyesuaikan pool size dengan jumlah destinasi unik (sekarang sekitar 33 destinasi)
-                    pool_size = min(30, num_items)
+                    pool_size = min(7, num_items)
                     
-                    # Menggunakan seed yang sudah aman untuk NumPy
                     np.random.seed(numpy_safe_seed)
                     noise_factor = np.random.normal(0, 0.05, num_items)
                     adjusted_predictions = predictions + noise_factor
